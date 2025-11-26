@@ -5,6 +5,7 @@ import Roadmap from '@/models/Roadmap';
 import RoadmapTask from '@/models/RoadmapTask';
 import { getCurrentUser } from '@/lib/auth';
 import { getOpenAIClient } from '@/lib/openai';
+import { getGeminiClient } from '@/lib/gemini';
 
 export async function GET(request) {
   try {
@@ -46,7 +47,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { prompt, title, duration, durationUnit } = await request.json();
+    const { prompt, title } = await request.json();
 
     if (!prompt && !title) {
       return NextResponse.json(
@@ -63,46 +64,65 @@ export async function POST(request) {
       userId: user.id,
       title: title || '',
       description: '',
-      duration: duration || 10,
-      durationUnit: durationUnit || 'days',
+      durationUnit: 'days',
       createdByAI: false,
     };
 
     let tasks = [];
 
-    // Generate roadmap with AI if prompt provided
+    // --- AI GENERATION USING GEMINI ---
     if (prompt) {
-      const openai = getOpenAIClient();
-      if (openai) {
-        try {
-          const response = await openai.chat.completions.create({
-            model: 'gpt-4',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a helpful assistant that creates detailed learning roadmaps. Respond in JSON format with {"title": "...", "description": "...", "duration": number, "durationUnit": "days/weeks/months", "tasks": [{"title": "...", "description": "...", "day": number, "week": number, "month": number}]}',
-              },
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-            temperature: 0.7,
-          });
+      const gemini = getGeminiClient();
 
-          const result = JSON.parse(response.choices[0].message.content);
+      if (gemini) {
+        try {
+          const aiPrompt = `
+You are an AI that generates detailed learning roadmaps.
+
+Return STRICT JSON ONLY. No explanation outside JSON.
+
+Format:
+{
+  "title": "",
+  "description": "",
+  "duration": number,
+  "durationUnit": "days" | "weeks" | "months",
+  "tasks": [
+    {
+      "title": "",
+      "description": "",
+      "day": number,
+      "week": number,
+      "month": number
+    }
+  ]
+}
+
+User request:
+"${prompt}"
+          `;
+
+          const result = await gemini.generateContent(aiPrompt);
+          let text = result.response.text();
+
+          // Remove possible markdown formatting
+          text = text.replace(/```json|```/g, "").trim();
+
+          const json = JSON.parse(text);
+
           roadmapData = {
             ...roadmapData,
-            title: result.title,
-            description: result.description,
-            duration: result.duration,
-            durationUnit: result.durationUnit,
+            title: json.title,
+            description: json.description,
+            duration: json.duration,
+            durationUnit: json.durationUnit,
             createdByAI: true,
           };
 
-          tasks = result.tasks || [];
-        } catch (aiError) {
-          console.error('AI roadmap generation error:', aiError);
+          tasks = json.tasks || [];
+
+        } catch (aiErr) {
+          console.error("Gemini AI Error:", aiErr);
         }
       }
     }
@@ -110,7 +130,6 @@ export async function POST(request) {
     const roadmap = new Roadmap(roadmapData);
     await roadmap.save();
 
-    // Create tasks
     const savedTasks = await Promise.all(
       tasks.map(async (task, index) => {
         const roadmapTask = new RoadmapTask({
@@ -124,6 +143,7 @@ export async function POST(request) {
           month: task.month,
           order: index,
         });
+
         return await roadmapTask.save();
       })
     );
@@ -132,6 +152,7 @@ export async function POST(request) {
       { roadmap: { ...roadmap.toObject(), tasks: savedTasks } },
       { status: 201 }
     );
+
   } catch (error) {
     console.error('Roadmap creation error:', error);
     return NextResponse.json(

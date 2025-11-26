@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
 
 export default function RoadmapsPage() {
   const [roadmaps, setRoadmaps] = useState([]);
@@ -18,6 +19,7 @@ export default function RoadmapsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [prompt, setPrompt] = useState('');
+  const [title,setTitle] = useState('');
 
   useEffect(() => {
     fetchRoadmaps();
@@ -44,7 +46,7 @@ export default function RoadmapsPage() {
       const response = await fetch('/api/roadmaps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, title}),
       });
 
       if (!response.ok) throw new Error('Failed to generate roadmap');
@@ -52,6 +54,7 @@ export default function RoadmapsPage() {
       toast.success('Roadmap created!');
       setIsDialogOpen(false);
       setPrompt('');
+      setTitle('');
       fetchRoadmaps();
     } catch (error) {
       console.error('Generate error:', error);
@@ -153,6 +156,11 @@ export default function RoadmapsPage() {
                     <Label>What do you want to learn?</Label>
                     <VoiceRecorder onTranscript={handleVoiceTranscript} />
                   </div>
+                  <Input
+                    placeholder="Title of your roadmap"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                  />
                   <Textarea
                     placeholder="e.g., Create a roadmap to learn React in 10 days"
                     className="min-h-[100px]"
